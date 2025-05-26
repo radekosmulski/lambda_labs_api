@@ -1,6 +1,6 @@
 # Lambda Labs API Client
 
-A Python command-line tool for managing GPU instances on Lambda Labs Cloud. This client provides an easy way to list, launch, and monitor GPU instances with automatic retry capabilities for high-demand resources.
+A Python client and command-line tool for managing GPU instances on Lambda Labs Cloud. This package provides an easy way to list, launch, and monitor GPU instances with automatic retry capabilities for high-demand resources.
 
 ## Features
 
@@ -13,27 +13,26 @@ A Python command-line tool for managing GPU instances on Lambda Labs Cloud. This
 
 ## Installation
 
-### Requirements
+### From PyPI (Recommended)
 
-- Python 3.6+
-- `requests` library
-
-### Setup
-
-1. Clone this repository:
 ```bash
-git clone <your-repo-url>
-cd lambda-labs-client
+pip install lambda-labs-client
 ```
 
-2. Install dependencies:
+### From Source
+
 ```bash
-pip install requests
+git clone https://github.com/radekosmulski/lambda_labs_api.git
+cd lambda_labs_api
+pip install .
 ```
 
-3. Make the script executable (optional):
+### Development Installation
+
 ```bash
-chmod +x lambda_labs_client.py
+git clone https://github.com/radekosmulski/lambda_labs_api.git
+cd lambda_labs_api
+pip install -e .[dev]
 ```
 
 ## Authentication
@@ -63,41 +62,41 @@ python lambda_labs_client.py --api-key "your-api-key-here" --list-instances
 #### List Running Instances
 ```bash
 # Using environment variable
-python lambda_labs_client.py --list-instances
+lambda-labs --list-instances
 
 # Using API key argument
-python lambda_labs_client.py --api-key "your-key" --list-instances
+lambda-labs --api-key "your-key" --list-instances
 ```
 
 #### List All Instance Types
 ```bash
 # Show all instance types (available and unavailable)
-python lambda_labs_client.py --list-types
+lambda-labs --list-types
 
 # Show only available instances
-python lambda_labs_client.py --list-types --show available
+lambda-labs --list-types --show available
 
 # Show only unavailable instances
-python lambda_labs_client.py --list-types --show unavailable
+lambda-labs --list-types --show unavailable
 
 # Filter by GPU type
-python lambda_labs_client.py --list-types --filter-type a100
-python lambda_labs_client.py --list-types --filter-type h100
+lambda-labs --list-types --filter-type a100
+lambda-labs --list-types --filter-type h100
 ```
 
 #### Launch an Instance
 ```bash
 # Basic launch (will fail if unavailable)
-python lambda_labs_client.py --launch gpu_1x_a100 --ssh-key "my-ssh-key"
+lambda-labs --launch gpu_1x_a100 --ssh-key "my-ssh-key"
 
 # Launch with custom name
-python lambda_labs_client.py --launch gpu_1x_a100 --ssh-key "my-ssh-key" --name "ML-Training"
+lambda-labs --launch gpu_1x_a100 --ssh-key "my-ssh-key" --name "ML-Training"
 
 # Launch in specific region
-python lambda_labs_client.py --launch gpu_1x_a100 --ssh-key "my-ssh-key" --region us-east-1
+lambda-labs --launch gpu_1x_a100 --ssh-key "my-ssh-key" --region us-east-1
 
 # Launch multiple instances
-python lambda_labs_client.py --launch gpu_1x_a100 --ssh-key "my-ssh-key" --quantity 2
+lambda-labs --launch gpu_1x_a100 --ssh-key "my-ssh-key" --quantity 2
 ```
 
 ### Auto-Retry Feature
@@ -106,16 +105,16 @@ The killer feature: automatically retry launching instances until they become av
 
 ```bash
 # Keep trying every 5 seconds until successful
-python lambda_labs_client.py --launch gpu_1x_a100 --ssh-key "my-ssh-key" --wait
+lambda-labs --launch gpu_1x_a100 --ssh-key "my-ssh-key" --wait
 
 # Retry with custom interval (every 10 seconds)
-python lambda_labs_client.py --launch gpu_8x_h100 --ssh-key "my-ssh-key" --wait --retry-interval 10
+lambda-labs --launch gpu_8x_h100 --ssh-key "my-ssh-key" --wait --retry-interval 10
 
 # Retry with maximum attempts
-python lambda_labs_client.py --launch gpu_1x_a100 --ssh-key "my-ssh-key" --wait --max-retries 100
+lambda-labs --launch gpu_1x_a100 --ssh-key "my-ssh-key" --wait --max-retries 100
 
 # Retry for specific region
-python lambda_labs_client.py --launch gpu_1x_a100 --ssh-key "my-ssh-key" --region us-west-1 --wait
+lambda-labs --launch gpu_1x_a100 --ssh-key "my-ssh-key" --region us-west-1 --wait
 ```
 
 Press `Ctrl+C` anytime to cancel the retry loop.
@@ -126,31 +125,31 @@ Press `Ctrl+C` anytime to cancel the retry loop.
 
 ```bash
 # First, see what's available
-python lambda_labs_client.py --list-types --show available
+lambda-labs --list-types --show available
 
 # Then launch an available instance
-python lambda_labs_client.py --launch gpu_1x_a100 --ssh-key "my-key"
+lambda-labs --launch gpu_1x_a100 --ssh-key "my-key"
 ```
 
 ### 2. Wait for High-Demand GPUs
 
 ```bash
 # Set up a retry for an H100 instance
-python lambda_labs_client.py --launch gpu_8x_h100 --ssh-key "my-key" --wait --retry-interval 30
+lambda-labs --launch gpu_8x_h100 --ssh-key "my-key" --wait --retry-interval 30
 ```
 
 ### 3. Monitor Your Instances
 
 ```bash
 # Check your running instances
-python lambda_labs_client.py --list-instances
+lambda-labs --list-instances
 ```
 
 ### 4. Launch in Preferred Region
 
 ```bash
 # Try to launch in us-east-1, but fall back to any available region
-python lambda_labs_client.py --launch gpu_1x_a100 --ssh-key "my-key" --region us-east-1 --wait
+lambda-labs --launch gpu_1x_a100 --ssh-key "my-key" --region us-east-1 --wait
 ```
 
 ## SSH Key Management
@@ -159,8 +158,36 @@ Before launching instances, you need to have SSH keys configured in your Lambda 
 
 To see your available SSH keys:
 ```bash
-python lambda_labs_client.py --launch gpu_1x_a100
+lambda-labs --launch gpu_1x_a100
 # (without specifying --ssh-key, it will list available keys)
+```
+
+## Python API Usage
+
+You can also use the client programmatically:
+
+```python
+from lambda_labs_client import LambdaLabsClient
+
+# Initialize client
+client = LambdaLabsClient(api_key="your-api-key")
+
+# List instances
+instances = client.list_instances()
+print(f"Found {len(instances)} running instances")
+
+# Get instance types
+instance_types = client.get_instance_types()
+print(f"Available instance types: {len(instance_types)}")
+
+# Launch an instance
+instance_ids = client.launch_instance(
+    region_name="us-west-1",
+    instance_type_name="gpu_1x_a100",
+    ssh_key_names=["my-ssh-key"],
+    name="My Instance"
+)
+print(f"Launched instances: {instance_ids}")
 ```
 
 ## Instance Type Examples
@@ -221,7 +248,7 @@ Total wait time: 0m 10s
 
 2. **Overnight Launches**: Set up a retry before going to bed:
    ```bash
-   python lambda_labs_client.py --launch gpu_8x_h100 --ssh-key "my-key" --wait --retry-interval 60
+   lambda-labs --launch gpu_8x_h100 --ssh-key "my-key" --wait --retry-interval 60
    ```
 
 3. **Cost Awareness**: Always check the hourly cost shown in `--list-types` before launching.
