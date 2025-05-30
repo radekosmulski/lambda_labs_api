@@ -6,7 +6,7 @@ A Python client for interacting with Lambda Labs Cloud API for managing GPU inst
 
 from .client import LambdaLabsClient
 
-__version__ = "0.1.0"
+__version__ = "0.2.0"
 __author__ = "Radek Osmulski"
 __email__ = "rosmulski@gmail.com"
 
