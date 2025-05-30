@@ -10,6 +10,7 @@ A Python client and command-line tool for managing GPU instances on Lambda Labs 
 - 🔄 **Automatic retry** - Keep trying to launch instances until they become available
 - 🔍 **Smart filtering** - Filter instance types by GPU model or availability status
 - 💰 **Cost tracking** - See hourly pricing for all instance types
+- 🛑 **Terminate instances** - Stop instances individually or all at once
 
 ## Installation
 
@@ -119,6 +120,22 @@ lambda-labs --launch gpu_1x_a100 --ssh-key "my-ssh-key" --region us-west-1 --wai
 
 Press `Ctrl+C` anytime to cancel the retry loop.
 
+### Terminating Instances
+
+```bash
+# Terminate specific instances by ID
+lambda-labs --terminate 0920582c7ff041399e34823a0be62549
+
+# Terminate multiple instances
+lambda-labs --terminate instance-id-1 instance-id-2 instance-id-3
+
+# Terminate ALL running instances
+lambda-labs --terminate all
+
+# Skip confirmation prompt (use with caution!)
+lambda-labs --terminate all --force
+```
+
 ## Common Workflows
 
 ### 1. Check What's Available and Launch
@@ -188,6 +205,16 @@ instance_ids = client.launch_instance(
     name="My Instance"
 )
 print(f"Launched instances: {instance_ids}")
+
+# Terminate a specific instance
+terminated = client.terminate_instance("instance-id-here")
+
+# Terminate multiple instances
+terminated = client.terminate_instances(["id1", "id2", "id3"])
+
+# Terminate all running instances
+terminated = client.terminate_all_instances()
+print(f"Terminated {len(terminated)} instances")
 ```
 
 ## Instance Type Examples
