@@ -920,7 +920,10 @@ def show_main_menu(client: LambdaLabsClient) -> None:
         # If we can't fetch instances, just continue
         pass
     
+    console.print("[dim]Select 'Refresh' to update instance status[/dim]\n")
+    
     choices = [
+        questionary.Choice("[Refresh]", value="refresh"),
         questionary.Choice("Launch a new instance", value="launch"),
         questionary.Choice("Terminate instances", value="terminate"),
         questionary.Choice("Manage SSH config", value="ssh_config"),
@@ -930,6 +933,7 @@ def show_main_menu(client: LambdaLabsClient) -> None:
     action = questionary.select(
         "What would you like to do?",
         choices=choices,
+        default="launch",  # Set default selection to "Launch a new instance"
         instruction=" ",
         qmark="",
         style=questionary.Style([
@@ -939,6 +943,10 @@ def show_main_menu(client: LambdaLabsClient) -> None:
             ('question', 'fg:#ffffff bold'),
         ])
     ).ask()
+    
+    if action == 'refresh':
+        show_main_menu(client)
+        return
     
     if action == "exit" or action is None:
         console.print("\n[dim]Goodbye![/dim]")
