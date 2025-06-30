@@ -14,9 +14,20 @@ import sys
 import argparse
 import time
 import signal
+import threading
 from typing import Optional, List, Dict, Any
 import requests
 from datetime import datetime
+from pathlib import Path
+from rich.console import Console
+from rich.table import Table
+from rich.progress import Progress, SpinnerColumn, TextColumn
+from rich.prompt import Prompt, Confirm
+from rich import print as rprint
+from rich.live import Live
+import questionary
+
+console = Console()
 
 
 class LambdaLabsClient:
@@ -268,14 +279,14 @@ def check_instance_availability(
 ) -> Optional[str]:
     """Check if a specific instance type is available and return the best region."""
     if desired_type not in instance_types:
-        print(f"Instance type '{desired_type}' not found.")
+        console.print(f"[red]Instance type '{desired_type}' not found.[/red]")
         return None
 
     type_info = instance_types[desired_type]
     available_regions = type_info["regions_with_capacity_available"]
 
     if not available_regions:
-        print(f"Instance type '{desired_type}' is not available in any region.")
+        console.print(f"[red]Instance type '{desired_type}' is not available in any region.[/red]")
         return None
 
     # If preferred region is specified and available
@@ -304,30 +315,30 @@ def launch_instance_with_retry(
 
     # Set up signal handler for graceful exit
     def signal_handler(sig: int, frame: Any) -> None:
-        print("\n\nCancelled by user.")
+        console.print("\n\n[yellow]Cancelled by user.[/yellow]")
         sys.exit(0)
 
     signal.signal(signal.SIGINT, signal_handler)
 
-    print(f"Starting launch attempts for '{instance_type}'...")
-    print(f"Retry interval: {retry_interval} seconds")
-    print(f"Max retries: {'unlimited' if max_retries is None else max_retries}")
-    print("Press Ctrl+C to cancel\n")
+    console.print(f"\n[bold]Starting launch attempts for '{instance_type}'...[/bold]")
+    console.print(f"Retry interval: [cyan]{retry_interval}[/cyan] seconds")
+    console.print(f"Max retries: [cyan]{'unlimited' if max_retries is None else max_retries}[/cyan]")
+    console.print("[dim]Press Ctrl+C to cancel[/dim]\n")
 
     while True:
         attempt += 1
         elapsed = int(time.time() - start_time)
         elapsed_str = f"{elapsed//60}m {elapsed%60}s" if elapsed >= 60 else f"{elapsed}s"
 
-        print(
-            f"[{datetime.now().strftime('%H:%M:%S')}] Attempt #{attempt} (elapsed: {elapsed_str})"
-        )
+        timestamp = datetime.now().strftime('%H:%M:%S')
+        console.print(f"[cyan]{timestamp}[/cyan] Attempt [bold]#{attempt}[/bold] (elapsed: {elapsed_str})")
 
-        # Check availability
-        region = client.check_instance_availability_silent(instance_type, preferred_region)
+        # Check availability with a spinner
+        with console.status("Checking availability...", spinner="dots"):
+            region = client.check_instance_availability_silent(instance_type, preferred_region)
 
         if region:
-            print(f"  ✅ Instance available in region '{region}'! Launching...")
+            console.print(f"  [green]✓[/green] Instance available in region '[bold]{region}[/bold]'!")
             try:
                 instance_ids = client.launch_instance(
                     region_name=region,
@@ -337,96 +348,762 @@ def launch_instance_with_retry(
                     quantity=quantity,
                 )
 
-                print(f"\n🎉 Successfully launched {len(instance_ids)} instance(s):")
+                console.print(f"\n[green bold]✨ Successfully launched {len(instance_ids)} instance(s):[/green bold]")
                 for instance_id in instance_ids:
-                    print(f"  - {instance_id}")
+                    console.print(f"  [green]•[/green] {instance_id}")
 
                 total_time = int(time.time() - start_time)
-                print(f"\nTotal wait time: {total_time//60}m {total_time%60}s")
+                console.print(f"\n[dim]Total wait time: {total_time//60}m {total_time%60}s[/dim]")
                 return instance_ids
 
             except Exception as e:
-                print(f"  ❌ Launch failed: {e}")
+                console.print(f"  [red]✗[/red] Launch failed: {e}")
                 # Continue retrying even if launch fails
         else:
             # Try to get more info about availability
             try:
                 instance_types = client.get_instance_types()
                 if instance_type in instance_types:
-                    print("  ❌ No availability in any region")
+                    console.print("  [red]✗[/red] No availability in any region")
                 else:
-                    print(f"  ❌ Instance type '{instance_type}' not found")
+                    console.print(f"  [red]✗[/red] Instance type '{instance_type}' not found")
                     return []
             except Exception:
-                print("  ❌ Unable to check availability")
+                console.print("  [red]✗[/red] Unable to check availability")
 
         # Check if we've hit max retries
         if max_retries is not None and attempt >= max_retries:
-            print(f"\n❌ Maximum retries ({max_retries}) reached. Giving up.")
+            console.print(f"\n[red]Maximum retries ({max_retries}) reached. Giving up.[/red]")
             return []
 
-        # Wait before next attempt
-        print(f"  ⏳ Waiting {retry_interval} seconds before next attempt...")
-        time.sleep(retry_interval)
+        # Wait before next attempt with a progress bar
+        console.print(f"  [yellow]⏱[/yellow] Waiting {retry_interval} seconds...")
+        with Progress(
+            SpinnerColumn(),
+            TextColumn("[progress.description]{task.description}"),
+            transient=True,
+            console=console,
+        ) as progress:
+            task = progress.add_task("Next attempt in...", total=retry_interval)
+            for i in range(retry_interval):
+                time.sleep(1)
+                progress.update(task, advance=1, description=f"Next attempt in {retry_interval - i - 1}s")
+
+
+def format_instance_choice(instance_type: str, instance_data: Dict[str, Any], for_display: bool = False) -> str:
+    """Format instance type data for the selector display."""
+    info = instance_data["instance_type"]
+    specs = info["specs"]
+    
+    # Extract GPU memory from description (e.g., "H100 (80 GB SXM5)" -> "80 GB")
+    gpu_desc = info.get("gpu_description", "")
+    
+    # Format pricing
+    price_cents = info.get("price_cents_per_hour", 0)
+    price_dollars = price_cents / 100
+    
+    # Format availability
+    regions = instance_data.get("regions_with_capacity_available", [])
+    is_available = bool(regions)
+    
+    if is_available:
+        availability = f" ✓ Available ({len(regions)})"
+    else:
+        availability = " ✗ Unavailable"
+    
+    # Build the display string with fixed-width columns for alignment
+    # Format components to match header widths exactly
+    cpu_str = f"{specs.get('vcpus', 0)} vCPUs"
+    ram_str = f"{specs.get('memory_gib', 0)} GB RAM"
+    gpu_str = f"{specs.get('gpus', 0)}x {gpu_desc}"
+    storage_str = f"{specs.get('storage_gib', 0)} GB SSD"
+    price_str = f"${price_dollars:.2f}/hr"
+    
+    formatted = (
+        f"{instance_type:<25} │ "
+        f"{cpu_str:>10} │ "
+        f"{ram_str:>12} │ "
+        f"{gpu_str:<24} │ "
+        f"{storage_str:>13} │ "
+        f"{price_str:>11} │ "
+        f"{availability:>15}"
+    )
+    
+    return formatted
+
+
+def select_instance_type(client: LambdaLabsClient, show_unavailable: bool = False) -> Optional[tuple[str, bool]]:
+    """Interactive instance type selector with toggle support."""
+    console.print("\n[bold]Fetching available instance types...[/bold]")
+    
+    with console.status("Loading instance types...", spinner="dots"):
+        instance_types = client.get_instance_types()
+    
+    while True:
+        # Filter and sort instances
+        choices = []
+        unavailable_count = 0
+        available_count = 0
+        
+        # First, collect all instances with their availability status
+        instances_list = []
+        for instance_type, data in instance_types.items():
+            has_capacity = bool(data.get("regions_with_capacity_available", []))
+            
+            if has_capacity:
+                available_count += 1
+            else:
+                unavailable_count += 1
+            
+            if show_unavailable or has_capacity:
+                instances_list.append((instance_type, data, has_capacity))
+        
+        # Sort instances: available first (sorted by name), then unavailable (sorted by name)
+        instances_list.sort(key=lambda x: (not x[2], x[0]))
+        
+        # Format and add to choices, tracking availability
+        availability_map = {}
+        for instance_type, data, has_capacity in instances_list:
+            formatted = format_instance_choice(instance_type, data, for_display=True)
+            choices.append(questionary.Choice(title=formatted, value=instance_type))
+            availability_map[instance_type] = has_capacity
+        
+        if not choices:
+            console.print("[red]No instances found.[/red]")
+            return None, False
+        
+        # Clear screen for cleaner display
+        console.clear()
+        
+        # Add header
+        console.print("[bold]Select an instance type:[/bold]")
+        if show_unavailable:
+            console.print(f"[dim]Showing all instances ({available_count} available, {unavailable_count} unavailable)[/dim]")
+        else:
+            console.print(f"[dim]Showing only available instances ({available_count} of {available_count + unavailable_count} total)[/dim]")
+        console.print("[dim]Use arrow keys to navigate, Enter to select, Ctrl+C to cancel[/dim]")
+        console.print("")
+        
+        # Display column headers
+        headers = (
+            f"   {'Instance Type':<25} │ "
+            f"{'CPUs':>10} │ "
+            f"{'RAM':>12} │ "
+            f"{'GPU':<24} │ "
+            f"{'Storage':>13} │ "
+            f"{'Price':>11} │ "
+            f"{'Status':>15}"
+        )
+        console.print(f"[bold cyan]{headers}[/bold cyan]")
+        console.print("─" * 134)
+        
+        # Add toggle option at the end
+        if not show_unavailable and unavailable_count > 0:
+            choices.append(questionary.Choice(
+                title=f"\n{'─' * 134}\n{'':>28}  → Show {unavailable_count} unavailable instance{'s' if unavailable_count != 1 else ''} ←",
+                value="__TOGGLE__"
+            ))
+        elif show_unavailable:
+            choices.append(questionary.Choice(
+                title=f"\n{'─' * 134}\n{'':>28}  → Hide unavailable instances ←",
+                value="__TOGGLE__"
+            ))
+        
+        # Use questionary for selection
+        try:
+            selected = questionary.select(
+                "",
+                choices=choices,
+                instruction=" ",
+                qmark="",
+                style=questionary.Style([
+                    ('selected', 'bg:#0489D1 fg:#ffffff bold'),
+                    ('pointer', 'fg:#0489D1 bold'),
+                    ('highlighted', 'fg:#0489D1 bold'),
+                    ('question', ''),
+                ])
+            ).ask()
+            
+            if selected == "__TOGGLE__":
+                show_unavailable = not show_unavailable
+                continue
+            else:
+                # Return instance type and whether it's available
+                is_available = availability_map.get(selected, False)
+                return selected, is_available
+            
+        except (KeyboardInterrupt, EOFError):
+            console.print("\n[yellow]Selection cancelled.[/yellow]")
+            return None, False
+
+
+def handle_launch(args: argparse.Namespace, client: LambdaLabsClient) -> None:
+    """Handle the launch subcommand."""
+    # If no instance type provided, show interactive selector
+    if not args.instance_type:
+        result = select_instance_type(client, show_unavailable=args.show_all)
+        if not result or not result[0]:
+            sys.exit(1)
+        instance_type, is_available = result
+        args.instance_type = instance_type
+        console.print(f"\n[green]Selected:[/green] {instance_type}")
+        
+        # If instance is not available, automatically enable wait mode
+        if not is_available:
+            console.print("[yellow]Instance is not currently available. Enabling auto-retry mode...[/yellow]\n")
+            args.wait = True
+        else:
+            console.print("")
+    
+    # Check if SSH key is provided
+    ssh_keys = client.list_ssh_keys()
+    
+    if not args.ssh_key:
+        if not ssh_keys:
+            console.print("[red]Error:[/red] No SSH keys found in your account.")
+            console.print("Please add an SSH key at: https://cloud.lambdaai.co/ssh-keys")
+            sys.exit(1)
+        elif len(ssh_keys) == 1:
+            # Automatically use the only SSH key
+            ssh_key = ssh_keys[0]['name']
+            console.print(f"[dim]Using SSH key: {ssh_key}[/dim]")
+        else:
+            # Multiple keys - prompt for selection
+            console.print("\n[yellow]Available SSH keys:[/yellow]")
+            for idx, key in enumerate(ssh_keys, 1):
+                console.print(f"  {idx}. {key['name']}")
+            
+            choice = Prompt.ask("\nSelect SSH key (number)")
+            try:
+                ssh_key = ssh_keys[int(choice) - 1]['name']
+            except (ValueError, IndexError):
+                console.print("[red]Invalid selection[/red]")
+                sys.exit(1)
+    else:
+        ssh_key = args.ssh_key
+        if ssh_key not in [k['name'] for k in ssh_keys]:
+            console.print(f"[red]Error:[/red] SSH key '{ssh_key}' not found")
+            console.print("\nAvailable SSH keys:")
+            for key in ssh_keys:
+                console.print(f"  - {key['name']}")
+            sys.exit(1)
+    
+    if args.wait:
+        # Use retry logic with rich progress
+        instance_ids = launch_instance_with_retry(
+            client=client,
+            instance_type=args.instance_type,
+            ssh_key=ssh_key,
+            preferred_region=args.region,
+            name=args.name,
+            quantity=args.quantity,
+            retry_interval=args.retry_interval,
+            max_retries=args.max_retries,
+        )
+        
+        if instance_ids:
+            console.print("\n[green]Success![/green] Use 'lambda-labs list' to see instance details.")
+    else:
+        # Single attempt launch
+        with console.status(f"Checking availability for '{args.instance_type}'..."):
+            instance_types = client.get_instance_types()
+            region = check_instance_availability(instance_types, args.instance_type, args.region)
+        
+        if not region:
+            console.print(f"\n[red]'{args.instance_type}' is not available in any region.[/red]")
+            console.print("\n[dim]Tip: Use --wait to keep retrying until available[/dim]")
+            sys.exit(1)
+        
+        # Launch instance
+        console.print(f"\n[green]✓[/green] Launching {args.quantity} '{args.instance_type}' instance(s) in '{region}'...")
+        
+        try:
+            instance_ids = client.launch_instance(
+                region_name=region,
+                instance_type_name=args.instance_type,
+                ssh_key_names=[ssh_key],
+                name=args.name,
+                quantity=args.quantity,
+            )
+            
+            console.print(f"\n[green]Successfully launched {len(instance_ids)} instance(s):[/green]")
+            for instance_id in instance_ids:
+                console.print(f"  • {instance_id}")
+            
+            console.print("\n[dim]Use 'lambda-labs list' to see instance details[/dim]")
+        except Exception as e:
+            console.print(f"\n[red]Failed to launch instance:[/red] {e}")
+            sys.exit(1)
+
+
+def handle_terminate_interactive(client: LambdaLabsClient, instances: List[Dict[str, Any]]) -> None:
+    """Interactive instance termination handler."""
+    console.print("\n[bold]Select instances to terminate:[/bold]")
+    console.print("[dim]Use arrow keys to navigate, Enter to select, Ctrl+C to cancel[/dim]\n")
+    
+    # Create choices for each instance
+    choices = []
+    for instance in instances:
+        name = instance.get('name', 'Unnamed')
+        instance_type = instance['instance_type']['name']
+        region = instance['region']['name']
+        
+        # Format the display string
+        display = (
+            f"{instance['id']:<20} │ "
+            f"{instance_type:<25} │ "
+            f"{name if name != 'Unnamed' else '[no name]':<20} │ "
+            f"{region:<12}"
+        )
+        choices.append(questionary.Choice(title=display, value=instance['id']))
+    
+    # Add "terminate all" option if multiple instances
+    if len(instances) > 1:
+        choices.append(questionary.Choice(
+            title=f"\n{'─' * 82}\n→ TERMINATE ALL {len(instances)} INSTANCES ←",
+            value="__ALL__"
+        ))
+    
+    # Show column headers
+    headers = (
+        f"{'Instance ID':<20} │ "
+        f"{'Type':<25} │ "
+        f"{'Name':<20} │ "
+        f"{'Region':<12}"
+    )
+    console.print(f"[bold cyan]{headers}[/bold cyan]")
+    console.print("─" * 82)
+    
+    try:
+        selected = questionary.select(
+            "",
+            choices=choices,
+            instruction=" ",
+            qmark="",
+            style=questionary.Style([
+                ('selected', 'bg:#E74C3C fg:#ffffff bold'),
+                ('pointer', 'fg:#E74C3C bold'),
+                ('highlighted', 'fg:#E74C3C bold'),
+                ('question', ''),
+            ])
+        ).ask()
+        
+        if selected is None:
+            console.print("\n[yellow]Termination cancelled.[/yellow]")
+            return
+        
+        # Determine what to terminate
+        if selected == "__ALL__":
+            to_terminate = instances
+            console.print(f"\n[red bold]Warning: This will terminate ALL {len(instances)} instances![/red bold]")
+        else:
+            to_terminate = [inst for inst in instances if inst['id'] == selected]
+            console.print(f"\n[red]Will terminate instance: {selected}[/red]")
+        
+        # Show instances to be terminated
+        for instance in to_terminate:
+            name = instance.get('name', 'Unnamed')
+            console.print(f"  • {instance['id']} - {instance['instance_type']['name']} - {name}")
+        
+        # Confirm termination
+        if not Confirm.ask("\nAre you sure you want to terminate?", default=False):
+            console.print("[yellow]Termination cancelled.[/yellow]")
+            return
+        
+        # Terminate instances
+        console.print("\n[bold]Terminating instances...[/bold]")
+        if selected == "__ALL__":
+            terminated = client.terminate_all_instances()
+        else:
+            terminated = client.terminate_instances([selected])
+        
+        if terminated:
+            console.print(f"\n[green]Successfully terminated {len(terminated)} instance(s):[/green]")
+            for instance in terminated:
+                console.print(f"  ✓ {instance['id']}")
+        else:
+            console.print("[red]No instances were terminated.[/red]")
+            
+    except (KeyboardInterrupt, EOFError):
+        console.print("\n[yellow]Termination cancelled.[/yellow]")
+        return
+
+
+def manage_ssh_config(action: str, instance: Optional[Dict[str, Any]] = None, host_alias: Optional[str] = None) -> bool:
+    """Manage SSH config entries for Lambda Labs instances."""
+    ssh_config_path = Path.home() / ".ssh" / "config"
+    
+    # Create .ssh directory if it doesn't exist
+    ssh_dir = ssh_config_path.parent
+    if not ssh_dir.exists():
+        ssh_dir.mkdir(mode=0o700)
+    
+    # Read existing config
+    if ssh_config_path.exists():
+        with open(ssh_config_path, 'r') as f:
+            lines = f.readlines()
+    else:
+        lines = []
+    
+    if action == "add" and instance:
+        # Get instance IP
+        ip_address = instance.get('ip', '')
+        if not ip_address:
+            console.print("[red]Error: Instance has no IP address[/red]")
+            return False
+        
+        # Use provided alias or generate one
+        if not host_alias:
+            host_alias = f"lambda-{instance['id'][:8]}"
+        
+        # Check if entry already exists
+        for i, line in enumerate(lines):
+            if line.strip() == f"Host {host_alias}":
+                console.print(f"[yellow]SSH config entry '{host_alias}' already exists[/yellow]")
+                return False
+        
+        # Add new entry
+        entry = [
+            f"\n# Lambda Labs instance {instance['id']}\n",
+            f"Host {host_alias}\n",
+            f"    HostName {ip_address}\n",
+            f"    User ubuntu\n",
+            f"    ForwardAgent yes\n",
+            f"    StrictHostKeyChecking no\n",
+            f"    UserKnownHostsFile /dev/null\n"
+        ]
+        
+        lines.extend(entry)
+        
+        # Write back
+        with open(ssh_config_path, 'w') as f:
+            f.writelines(lines)
+        
+        # Ensure proper permissions
+        ssh_config_path.chmod(0o600)
+        
+        console.print(f"[green]✓ Added SSH config entry '{host_alias}'[/green]")
+        console.print(f"[dim]Config file: {ssh_config_path.expanduser()}[/dim]")
+        console.print(f"[dim]You can now connect with: ssh {host_alias}[/dim]")
+        return True
+    
+    elif action == "remove":
+        # Find and remove Lambda Labs entries
+        new_lines = []
+        i = 0
+        removed_count = 0
+        
+        while i < len(lines):
+            # Check if this is a Lambda Labs entry
+            if i > 0 and "Lambda Labs instance" in lines[i-1] and lines[i].strip().startswith("Host "):
+                # Skip the comment line
+                if i > 0 and lines[i-1].strip().startswith("#"):
+                    i -= 1
+                
+                # Skip until next Host or end
+                while i < len(lines) and not (lines[i].strip().startswith("Host ") and "Lambda Labs" not in lines[max(0, i-1)]):
+                    i += 1
+                removed_count += 1
+            else:
+                new_lines.append(lines[i])
+                i += 1
+        
+        if removed_count > 0:
+            # Write back
+            with open(ssh_config_path, 'w') as f:
+                f.writelines(new_lines)
+            
+            console.print(f"[green]✓ Removed {removed_count} Lambda Labs SSH config entries[/green]")
+            return True
+        else:
+            console.print("[yellow]No Lambda Labs SSH config entries found[/yellow]")
+            return False
+    
+    return False
+
+
+def handle_ssh_config_interactive(client: LambdaLabsClient) -> None:
+    """Interactive SSH config management."""
+    choices = [
+        questionary.Choice("Add SSH config for running instances", value="add"),
+        questionary.Choice("Remove all Lambda Labs SSH configs", value="remove"),
+        questionary.Choice("Back to main menu", value="back"),
+    ]
+    
+    action = questionary.select(
+        "SSH Config Management:",
+        choices=choices,
+        instruction=" ",
+        qmark="",
+        style=questionary.Style([
+            ('selected', 'bg:#0489D1 fg:#ffffff bold'),
+            ('pointer', 'fg:#0489D1 bold'),
+            ('highlighted', 'fg:#0489D1 bold'),
+            ('question', 'fg:#ffffff bold'),
+        ])
+    ).ask()
+    
+    if action == "back" or action is None:
+        return
+    
+    if action == "add":
+        # Get running instances
+        instances = client.list_instances()
+        if not instances:
+            console.print("\n[yellow]No running instances to add SSH config for[/yellow]")
+            return
+        
+        # Show instances to choose from
+        console.print("\n[bold]Select instance to add SSH config:[/bold]\n")
+        
+        choices = []
+        for instance in instances:
+            name = instance.get('name', 'Unnamed')
+            instance_type = instance['instance_type']['name']
+            ip = instance.get('ip', 'No IP')
+            
+            display = f"{instance['id'][:16]}...  •  {instance_type:<25}  •  {name:<20}  •  {ip}"
+            choices.append(questionary.Choice(title=display, value=instance))
+        
+        selected_instance = questionary.select(
+            "",
+            choices=choices,
+            instruction=" ",
+            qmark="",
+        ).ask()
+        
+        if selected_instance:
+            # Ask for custom alias
+            alias = Prompt.ask(
+                "\nEnter SSH alias (or press Enter for auto-generated)",
+                default=f"lambda-{selected_instance['id'][:8]}"
+            )
+            
+            manage_ssh_config("add", selected_instance, alias)
+    
+    elif action == "remove":
+        if Confirm.ask("\nRemove all Lambda Labs SSH config entries?", default=False):
+            manage_ssh_config("remove")
+
+
+def show_main_menu(client: LambdaLabsClient) -> None:
+    """Show interactive main menu with instance list."""
+    console.clear()
+    console.print("[bold]Lambda Labs Instance Manager[/bold]\n")
+    
+    # Show running instances
+    try:
+        instances = client.list_instances()
+        if instances:
+            console.print("[dim]Running instances:[/dim]")
+            for instance in instances:
+                name = instance.get('name', 'Unnamed')
+                instance_type = instance['instance_type']['name']
+                region = instance['region']['name']
+                status = instance.get('status', 'unknown')
+                
+                # Color code the status
+                if status.lower() == 'active':
+                    status_display = f"[green]● {status}[/green]"
+                elif status.lower() in ['booting', 'provisioning']:
+                    status_display = f"[yellow]● {status}[/yellow]"
+                elif status.lower() in ['terminated', 'terminating']:
+                    status_display = f"[red]● {status}[/red]"
+                else:
+                    status_display = f"[dim]● {status}[/dim]"
+                
+                console.print(f"  ▸ [cyan]{instance['id']}[/cyan]  •  {instance_type:<25}  •  {name if name != 'Unnamed' else '[dim]no name[/dim]':<20}  •  {region:<12}  •  {status_display}")
+            console.print("")
+        else:
+            console.print("[dim]No running instances[/dim]\n")
+    except Exception:
+        # If we can't fetch instances, just continue
+        pass
+    
+    choices = [
+        questionary.Choice("Launch a new instance", value="launch"),
+        questionary.Choice("Terminate instances", value="terminate"),
+        questionary.Choice("Manage SSH config", value="ssh_config"),
+        questionary.Choice("Exit", value="exit"),
+    ]
+    
+    action = questionary.select(
+        "What would you like to do?",
+        choices=choices,
+        instruction=" ",
+        qmark="",
+        style=questionary.Style([
+            ('selected', 'bg:#0489D1 fg:#ffffff bold'),
+            ('pointer', 'fg:#0489D1 bold'),
+            ('highlighted', 'fg:#0489D1 bold'),
+            ('question', 'fg:#ffffff bold'),
+        ])
+    ).ask()
+    
+    if action == "exit" or action is None:
+        console.print("\n[dim]Goodbye![/dim]")
+        sys.exit(0)
+    
+    # Create a namespace to simulate command line args
+    from argparse import Namespace
+    
+    if action == "launch":
+        args = Namespace(
+            command="launch",
+            instance_type=None,
+            ssh_key=None,
+            region=None,
+            name=None,
+            quantity=1,
+            wait=False,
+            retry_interval=5,
+            max_retries=None,
+            show_all=False
+        )
+        handle_launch(args, client)
+    
+    elif action == "terminate":
+        instances = client.list_instances()
+        if not instances:
+            console.print("\n[yellow]No running instances to terminate.[/yellow]")
+        else:
+            handle_terminate_interactive(client, instances)
+    
+    elif action == "ssh_config":
+        handle_ssh_config_interactive(client)
+    
+    # Ask if user wants to continue (default to Yes)
+    console.print("\n")
+    if Confirm.ask("Would you like to perform another action?", default=True):
+        show_main_menu(client)
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(description="Lambda Labs API Client")
-    parser.add_argument("--api-key", help="Lambda Labs API key (or set LAMBDA_API_KEY env var)")
-    parser.add_argument("--list-instances", action="store_true", help="List running instances")
-    parser.add_argument("--list-types", action="store_true", help="List all instance types")
-    parser.add_argument(
-        "--filter-type", help="Filter instance types by name (e.g., 'a100', 'h100')"
+    parser = argparse.ArgumentParser(
+        description="Lambda Labs Instance Manager",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog="""Examples:
+  lambda-labs                            # Interactive main menu
+  lambda-labs launch                     # Interactive instance selection
+  lambda-labs launch gpu_1x_h100_pcie    # Launch specific instance type
+  lambda-labs launch --wait              # Interactive selection with auto-retry
+  lambda-labs list                       # List running instances
+  lambda-labs terminate <instance-id>    # Terminate an instance
+"""
     )
+    
+    # Global arguments
     parser.add_argument(
-        "--show",
-        choices=["all", "available", "unavailable"],
-        default="all",
-        help="Show all, only available, or only unavailable instance types",
+        "--api-key", 
+        help="Lambda Labs API key (or set LAMBDA_API_KEY env var)"
     )
-    parser.add_argument("--launch", help="Launch an instance of the specified type")
-    parser.add_argument("--region", help="Preferred region for launching")
-    parser.add_argument("--ssh-key", help="SSH key name to use for launch")
-    parser.add_argument("--name", help="Name for the new instance")
-    parser.add_argument("--quantity", type=int, default=1, help="Number of instances to launch")
-    parser.add_argument(
-        "--wait", action="store_true", help="Keep retrying if instance is unavailable"
+    
+    # Create subparsers
+    subparsers = parser.add_subparsers(dest="command", help="Available commands")
+    
+    # Launch command
+    launch_parser = subparsers.add_parser(
+        "launch", 
+        help="Launch GPU instances",
+        description="Launch one or more GPU instances"
     )
-    parser.add_argument(
-        "--retry-interval", type=int, default=5, help="Seconds between retry attempts (default: 5)"
+    launch_parser.add_argument(
+        "instance_type",
+        nargs="?",
+        help="Instance type to launch (e.g., gpu_1x_h100_pcie). If not provided, shows interactive selector"
     )
-    parser.add_argument(
-        "--max-retries", type=int, help="Maximum number of retries (default: unlimited)"
+    launch_parser.add_argument(
+        "--ssh-key", 
+        help="SSH key name (interactive selection if not provided)"
     )
-    parser.add_argument(
-        "--terminate",
-        nargs="*",
-        metavar="INSTANCE_ID",
-        help="Terminate instance(s) by ID. Use 'all' to terminate all instances",
+    launch_parser.add_argument(
+        "--region", 
+        help="Preferred region for launching"
     )
-    parser.add_argument(
-        "--force", action="store_true", help="Skip confirmation prompt when terminating instances"
+    launch_parser.add_argument(
+        "--name", 
+        help="Name for the instance(s)"
+    )
+    launch_parser.add_argument(
+        "--quantity", 
+        type=int, 
+        default=1, 
+        help="Number of instances to launch (default: 1)"
+    )
+    launch_parser.add_argument(
+        "--wait", 
+        action="store_true", 
+        help="Keep retrying if instance is unavailable"
+    )
+    launch_parser.add_argument(
+        "--retry-interval", 
+        type=int, 
+        default=5, 
+        help="Seconds between retry attempts (default: 5)"
+    )
+    launch_parser.add_argument(
+        "--max-retries", 
+        type=int, 
+        help="Maximum number of retries (default: unlimited)"
+    )
+    launch_parser.add_argument(
+        "--show-all", 
+        action="store_true", 
+        help="Show all instance types including unavailable ones in the selector"
     )
 
+    # For now, keep the old commands working alongside the new ones
+    # This is for backward compatibility
+    parser.add_argument("--list-instances", action="store_true", help="(Deprecated) Use 'lambda-labs list' instead")
+    parser.add_argument("--list-types", action="store_true", help="(Deprecated) Use 'lambda-labs list types' instead")
+    parser.add_argument("--launch", help="(Deprecated) Use 'lambda-labs launch' instead")
+    parser.add_argument("--terminate", nargs="*", help="(Deprecated) Use 'lambda-labs terminate' instead")
+    parser.add_argument("--filter-type", help="Filter instance types by name")
+    parser.add_argument("--show", choices=["all", "available", "unavailable"], default="all")
+    parser.add_argument("--region", help="Preferred region")
+    parser.add_argument("--ssh-key", help="SSH key name")
+    parser.add_argument("--name", help="Instance name")
+    parser.add_argument("--quantity", type=int, default=1)
+    parser.add_argument("--wait", action="store_true")
+    parser.add_argument("--retry-interval", type=int, default=5)
+    parser.add_argument("--max-retries", type=int)
+    parser.add_argument("--force", action="store_true")
+    
     args = parser.parse_args()
-
+    
     # Get API key from args or environment
     api_key = args.api_key or os.environ.get("LAMBDA_API_KEY")
     if not api_key:
-        print(
-            "Error: API key not provided. Use --api-key or set LAMBDA_API_KEY environment variable."
-        )
+        console.print("[red]Error:[/red] API key not provided.")
+        console.print("Use --api-key or set LAMBDA_API_KEY environment variable.")
         sys.exit(1)
-
+    
     # Initialize client
     try:
         client = LambdaLabsClient(api_key)
     except Exception as e:
-        print(f"Error initializing client: {e}")
+        console.print(f"[red]Error initializing client:[/red] {e}")
         sys.exit(1)
 
-    # Handle different operations
+    # If no command provided, show interactive menu
+    if not args.command and not any([args.launch, args.list_instances, args.list_types, args.terminate]):
+        show_main_menu(client)
+        return
+    
+    # Handle new subcommands
+    if args.command == "launch":
+        handle_launch(args, client)
+        return
+    
+    # Handle legacy commands for backward compatibility
     try:
+        if args.launch:
+            console.print("[yellow]Note:[/yellow] --launch is deprecated. Use 'lambda-labs launch' instead.")
+            # Convert to new format and handle
+            args.instance_type = args.launch
+            handle_launch(args, client)
+            return
+            
         if args.list_instances:
             instances = client.list_instances()
             print_instances(instances)
