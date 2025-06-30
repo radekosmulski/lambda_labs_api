@@ -1,18 +1,18 @@
 # Lambda Labs API Client
 
-A Python client and command-line tool for managing GPU instances on Lambda Labs Cloud. This package provides an easy way to list, launch, and monitor GPU instances with automatic retry capabilities for high-demand resources.
+A modern Python client and CLI for managing GPU instances on Lambda Labs Cloud. Features an interactive interface with Rich terminal UI for seamless instance management.
 
-## Features
+## ✨ Features
 
-- 📋 **List running instances** - View all your active instances with details
-- 🖥️ **List instance types** - See all available GPU types (including unavailable ones)
-- 🚀 **Launch instances** - Start new GPU instances with a single command
-- 🔄 **Automatic retry** - Keep trying to launch instances until they become available
-- 🔍 **Smart filtering** - Filter instance types by GPU model or availability status
-- 💰 **Cost tracking** - See hourly pricing for all instance types
-- 🛑 **Terminate instances** - Stop instances individually or all at once
+- 🎨 **Interactive CLI** - Beautiful terminal UI with arrow-key navigation
+- 📋 **Instance Management** - List, launch, and terminate GPU instances
+- 🔄 **Auto-Retry** - Automatically retry launching unavailable instances
+- 🖥️ **SSH Config Management** - Add instances to ~/.ssh/config for easy access
+- 🎯 **Smart Selection** - Interactive instance type selector with hardware details
+- 💰 **Cost Tracking** - See hourly pricing for all instance types
+- 🔍 **Status Display** - Color-coded instance statuses (active, booting, etc.)
 
-## Installation
+## 📦 Installation
 
 ### From PyPI (Recommended)
 
@@ -28,160 +28,125 @@ cd lambda_labs_api
 pip install .
 ```
 
-### Development Installation
+## 🔑 Authentication
 
-```bash
-git clone https://github.com/radekosmulski/lambda_labs_api.git
-cd lambda_labs_api
-pip install -e .[dev]
-```
-
-## Authentication
-
-You need a Lambda Labs API key to use this client. Get one from the [Lambda Labs API keys page](https://cloud.lambda.ai/api-keys).
+Get your API key from the [Lambda Labs API keys page](https://cloud.lambda.ai/api-keys).
 
 ### Setting up your API key
 
-You can provide your API key in two ways:
-
-#### Option 1: Environment Variable (Recommended)
 ```bash
 export LAMBDA_API_KEY="your-api-key-here"
 ```
 
 Add this to your `~/.bashrc` or `~/.zshrc` to make it permanent.
 
-#### Option 2: Command Line Argument
-```bash
-python lambda_labs_client.py --api-key "your-api-key-here" --list-instances
-```
+## 🚀 Quick Start
 
-## Usage
+### Interactive Mode (Recommended)
 
-### Basic Commands
-
-#### List Running Instances
-```bash
-# Using environment variable
-lambda-labs --list-instances
-
-# Using API key argument
-lambda-labs --api-key "your-key" --list-instances
-```
-
-#### List All Instance Types
-```bash
-# Show all instance types (available and unavailable)
-lambda-labs --list-types
-
-# Show only available instances
-lambda-labs --list-types --show available
-
-# Show only unavailable instances
-lambda-labs --list-types --show unavailable
-
-# Filter by GPU type
-lambda-labs --list-types --filter-type a100
-lambda-labs --list-types --filter-type h100
-```
-
-#### Launch an Instance
-```bash
-# Basic launch (will fail if unavailable)
-lambda-labs --launch gpu_1x_a100 --ssh-key "my-ssh-key"
-
-# Launch with custom name
-lambda-labs --launch gpu_1x_a100 --ssh-key "my-ssh-key" --name "ML-Training"
-
-# Launch in specific region
-lambda-labs --launch gpu_1x_a100 --ssh-key "my-ssh-key" --region us-east-1
-
-# Launch multiple instances
-lambda-labs --launch gpu_1x_a100 --ssh-key "my-ssh-key" --quantity 2
-```
-
-### Auto-Retry Feature
-
-The killer feature: automatically retry launching instances until they become available!
+Simply run without any arguments to enter the interactive interface:
 
 ```bash
-# Keep trying every 5 seconds until successful
-lambda-labs --launch gpu_1x_a100 --ssh-key "my-ssh-key" --wait
-
-# Retry with custom interval (every 10 seconds)
-lambda-labs --launch gpu_8x_h100 --ssh-key "my-ssh-key" --wait --retry-interval 10
-
-# Retry with maximum attempts
-lambda-labs --launch gpu_1x_a100 --ssh-key "my-ssh-key" --wait --max-retries 100
-
-# Retry for specific region
-lambda-labs --launch gpu_1x_a100 --ssh-key "my-ssh-key" --region us-west-1 --wait
+lambda-labs
 ```
 
-Press `Ctrl+C` anytime to cancel the retry loop.
+This opens an interactive menu where you can:
+- View running instances with live status
+- Launch new instances with guided selection
+- Terminate instances
+- Manage SSH configurations
+- Refresh instance status
 
-### Terminating Instances
+### Command Line Mode
+
+You can also use direct commands:
 
 ```bash
-# Terminate specific instances by ID
-lambda-labs --terminate 0920582c7ff041399e34823a0be62549
+# List running instances
+lambda-labs list
 
-# Terminate multiple instances
-lambda-labs --terminate instance-id-1 instance-id-2 instance-id-3
+# Launch an instance (interactive selection)
+lambda-labs launch
 
-# Terminate ALL running instances
-lambda-labs --terminate all
+# Launch a specific instance type
+lambda-labs launch gpu_1x_a100 --ssh-key my-key
 
-# Skip confirmation prompt (use with caution!)
-lambda-labs --terminate all --force
+# Terminate instances
+lambda-labs terminate <instance-id>
 ```
 
-## Common Workflows
+## 📖 Detailed Usage
 
-### 1. Check What's Available and Launch
+### Interactive Features
+
+#### Main Menu
+```
+Lambda Labs Instance Manager
+
+Running instances:
+  ▸ 1117df1d3dd949a0a8b0abdccd35eb7e  •  gpu_1x_a10  •  ML-Training  •  us-east-1  •  ● active
+
+Select 'Refresh' to update instance status
+
+What would you like to do?
+ » Launch a new instance
+   Terminate instances
+   Manage SSH config
+   Exit
+```
+
+#### Instance Selection
+When launching, you'll see an interactive selector with detailed hardware specs:
+
+```
+Select an instance type:
+──────────────────────────────────────────────────────────────────────
+   Instance Type         GPU            CPUs    RAM      SSD      Price
+──────────────────────────────────────────────────────────────────────
+ » gpu_1x_a10           1x A10 (24 GB)   30    200 GB   512 GB   $0.75/hr
+   gpu_1x_a100_sxm4     1x A100 (40 GB)  30    200 GB   512 GB   $1.29/hr
+   gpu_8x_a100_80gb     8x A100 (80 GB)  124   1800 GB  3500 GB  $34.00/hr
+```
+
+### Command Line Examples
+
+#### Launch with Auto-Retry
+```bash
+# Keep trying until an instance becomes available
+lambda-labs launch gpu_1x_a100 --wait
+
+# With custom retry interval (every 30 seconds)
+lambda-labs launch gpu_8x_h100 --wait --retry-interval 30
+
+# With maximum retry attempts
+lambda-labs launch gpu_1x_a100 --wait --max-retries 100
+```
+
+#### Launch Multiple Instances
+```bash
+lambda-labs launch gpu_1x_a100 --quantity 3 --ssh-key my-key
+```
+
+#### Region-Specific Launch
+```bash
+lambda-labs launch gpu_1x_a100 --region us-west-1 --ssh-key my-key
+```
+
+### SSH Config Management
+
+The tool can automatically add launched instances to your `~/.ssh/config`:
 
 ```bash
-# First, see what's available
-lambda-labs --list-types --show available
+# After launching, you'll be prompted to add to SSH config
+# Or manage SSH configs from the main menu
 
-# Then launch an available instance
-lambda-labs --launch gpu_1x_a100 --ssh-key "my-key"
+# Then connect easily:
+ssh lambda-instance-name
 ```
 
-### 2. Wait for High-Demand GPUs
+## 🐍 Python API Usage
 
-```bash
-# Set up a retry for an H100 instance
-lambda-labs --launch gpu_8x_h100 --ssh-key "my-key" --wait --retry-interval 30
-```
-
-### 3. Monitor Your Instances
-
-```bash
-# Check your running instances
-lambda-labs --list-instances
-```
-
-### 4. Launch in Preferred Region
-
-```bash
-# Try to launch in us-east-1, but fall back to any available region
-lambda-labs --launch gpu_1x_a100 --ssh-key "my-key" --region us-east-1 --wait
-```
-
-## SSH Key Management
-
-Before launching instances, you need to have SSH keys configured in your Lambda Labs account. 
-
-To see your available SSH keys:
-```bash
-lambda-labs --launch gpu_1x_a100
-# (without specifying --ssh-key, it will list available keys)
-```
-
-## Python API Usage
-
-You can also use the client programmatically:
+Use the client programmatically in your Python scripts:
 
 ```python
 from lambda_labs_client import LambdaLabsClient
@@ -191,114 +156,107 @@ client = LambdaLabsClient(api_key="your-api-key")
 
 # List instances
 instances = client.list_instances()
-print(f"Found {len(instances)} running instances")
-
-# Get instance types
-instance_types = client.get_instance_types()
-print(f"Available instance types: {len(instance_types)}")
+for instance in instances:
+    print(f"{instance['name']}: {instance['status']}")
 
 # Launch an instance
 instance_ids = client.launch_instance(
     region_name="us-west-1",
     instance_type_name="gpu_1x_a100",
     ssh_key_names=["my-ssh-key"],
-    name="My Instance"
+    name="ML-Training"
 )
-print(f"Launched instances: {instance_ids}")
 
-# Terminate a specific instance
-terminated = client.terminate_instance("instance-id-here")
-
-# Terminate multiple instances
-terminated = client.terminate_instances(["id1", "id2", "id3"])
-
-# Terminate all running instances
-terminated = client.terminate_all_instances()
-print(f"Terminated {len(terminated)} instances")
+# Terminate instances
+client.terminate_instance("instance-id")
 ```
 
-## Instance Type Examples
+## 📊 Instance Types
 
-Common instance types you can launch:
-- `gpu_1x_a10` - 1x A10 (24 GB)
-- `gpu_1x_a100` - 1x A100 (40 GB)
-- `gpu_8x_a100` - 8x A100 (40 GB)
-- `gpu_1x_h100` - 1x H100 (80 GB)
-- `gpu_8x_h100` - 8x H100 (80 GB)
+Common GPU instances available:
 
-## Output Examples
+| Type | GPUs | VRAM | Use Case |
+|------|------|------|----------|
+| `gpu_1x_a10` | 1x A10 | 24 GB | Development, light training |
+| `gpu_1x_a100` | 1x A100 | 40 GB | Training, fine-tuning |
+| `gpu_2x_a100` | 2x A100 | 80 GB | Distributed training |
+| `gpu_4x_a100` | 4x A100 | 160 GB | Large model training |
+| `gpu_8x_a100_80gb` | 8x A100 | 640 GB | Large scale training |
+| `gpu_1x_h100_pcie` | 1x H100 | 80 GB | Latest generation training |
+| `gpu_8x_h100_sxm5` | 8x H100 | 640 GB | Cutting-edge AI workloads |
 
-### Listing Instances
-```
-================================================================================
-                               RUNNING INSTANCES                                
-================================================================================
+## 💡 Tips & Tricks
 
-Instance: ML-Training (ID: 0920582c7ff041399e34823a0be62549)
-  Status: active
-  Type: 1x A100 (40 GB SXM4)
-  Region: California, USA (us-west-1)
-  Public IP: 198.51.100.2
-  Private IP: 10.0.2.100
-  SSH Keys: my-ssh-key
-  Jupyter URL: https://jupyter-url.lambdaspaces.com/?token=...
-  Cost: $1.29/hour
-```
-
-### Auto-Retry Output
-```
-Starting launch attempts for 'gpu_1x_a100'...
-Retry interval: 5 seconds
-Max retries: unlimited
-Press Ctrl+C to cancel
-
-[14:23:45] Attempt #1 (elapsed: 0s)
-  ❌ No availability in any region
-  ⏳ Waiting 5 seconds before next attempt...
-
-[14:23:50] Attempt #2 (elapsed: 5s)
-  ❌ No availability in any region
-  ⏳ Waiting 5 seconds before next attempt...
-
-[14:23:55] Attempt #3 (elapsed: 10s)
-  ✅ Instance available in region 'us-west-1'! Launching...
-
-🎉 Successfully launched 1 instance(s):
-  - 0920582c7ff041399e34823a0be62549
-
-Total wait time: 0m 10s
-```
-
-## Tips
-
-1. **High-Demand GPUs**: H100 and A100 instances are often fully booked. Use `--wait` to automatically grab one when it becomes available.
-
-2. **Overnight Launches**: Set up a retry before going to bed:
+1. **High-Demand GPUs**: H100s are often fully booked. Use the auto-retry feature:
    ```bash
-   lambda-labs --launch gpu_8x_h100 --ssh-key "my-key" --wait --retry-interval 60
+   lambda-labs launch gpu_8x_h100_sxm5 --wait --retry-interval 60
    ```
 
-3. **Cost Awareness**: Always check the hourly cost shown in `--list-types` before launching.
+2. **Overnight Launches**: Set up a long-running retry before bed:
+   ```bash
+   lambda-labs launch gpu_8x_a100_80gb --wait --max-retries 500
+   ```
 
-4. **Region Selection**: Some regions have better availability. If you don't need a specific region, don't specify `--region` to allow the tool to pick any available region.
+3. **SSH Convenience**: Always add instances to SSH config for easy access
 
-## Error Handling
+4. **Cost Awareness**: Check prices in the instance selector before launching
 
-The client provides clear error messages:
-- **Invalid API Key**: Check your API key or create a new one
-- **No SSH Keys**: Add SSH keys to your Lambda Labs account first
-- **Instance Type Not Found**: Use `--list-types` to see valid instance names
-- **No Availability**: Use `--wait` to keep retrying
+5. **Refresh Status**: Use the Refresh option in the main menu to update instance statuses
 
-## License
+## 🛠️ Development
 
-[Your chosen license]
+### Setup Development Environment
+```bash
+git clone https://github.com/radekosmulski/lambda_labs_api.git
+cd lambda_labs_api
+pip install -e .[dev]
+```
 
-## Contributing
+### Run Tests
+```bash
+pytest
+```
 
-[Your contribution guidelines]
+### Code Formatting
+```bash
+black lambda_labs_client/ --line-length 100
+flake8 lambda_labs_client/
+mypy lambda_labs_client/
+```
 
-## Support
+## 📝 License
 
-For issues with the Lambda Labs API itself, contact Lambda Labs support.
-For issues with this client, please open a GitHub issue.
+MIT License - see LICENSE file for details.
+
+## 🤝 Contributing
+
+Contributions are welcome! Please feel free to submit a Pull Request.
+
+## 💬 Support
+
+- For Lambda Labs API issues: Contact [Lambda Labs support](https://lambdalabs.com/support)
+- For client issues: Open a [GitHub issue](https://github.com/radekosmulski/lambda_labs_api/issues)
+
+## 🔧 Troubleshooting
+
+### API Key Issues
+```bash
+# Check if API key is set
+echo $LAMBDA_API_KEY
+
+# Verify API key works
+lambda-labs list
+```
+
+### SSH Key Issues
+Make sure you have SSH keys configured in your Lambda Labs account before launching instances.
+
+### Connection Issues
+If you can't connect to an instance:
+1. Check the instance status is "active"
+2. Verify the SSH key is correct
+3. Ensure your IP is not blocked by firewalls
+
+---
+
+Built with ❤️ using [Rich](https://github.com/Textualize/rich) and [questionary](https://github.com/tmbo/questionary)
